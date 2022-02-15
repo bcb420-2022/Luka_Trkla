@@ -1,0 +1,397 @@
+---
+title: 'Assignment #1 - Data Set Selection and Initial Processing'
+author: "Luka Trkla"
+output:
+  html_document:
+    df_print: paged
+---
+
+## Prerequisite Info on Data Selection
+For ease of use, I wanted to include a link to my journal entry page that is
+complementary to this R Notebook
+[here](https://github.com/bcb420-2022/Luka_Trkla/wiki/%233---Assignment-1).
+This R Notebook begins with me already having chosen an expression data set [GSE159559](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE159559) using 
+the techniques shown in Lecture 3 in class. It has the required counts file 
+associated with it in GEO, as we will be interacting with it here. For more 
+detailed information on how this data set was selected, please visit the 
+complementary journal entry.
+
+## Brief Prelude Into the Data Selected.
+The experiment pertaining to the data set used in the assignment is of both
+personal and therapeutic significance. Firstly, I am interested in 
+adenocarcinoma, a form of cancer formed in the glands surrounding organs.
+Adenocarcinoma often is a likely culprit for metastasizing elsewhere in
+the body, dramatically increasing patient harm, and decreasing probability of
+recovery. To add, lung adenocarcinoma metastasizes frequently into the brain,
+which is a difficult organ for treatment purposes. The experiment posits that 
+FAM83H‐AS1, a noncoding driver of oncogenesis, might potentially be a 
+therapeutic target for lung adenocarcinoma. The experiment provides 3 negative 
+controls for A549 cells in humans, followed by down regulated A549 cells for 
+FAM83H‐AS1, in hopes of illuminating that FAM83H-AS1 inhibits lung 
+adenocarcinoma apoptosis.
+
+
+## Downloading the Data
+Firstly, I want to download any prerequisite packages that I will need to work
+on the data set, and load it into the library.
+```{r}
+# Here I download BiocManager only if it is unavailable prior.
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+library(BiocManager)
+
+# Here I download GEOmetadb only if it is unavailable prior.
+if (!requireNamespace("GEOmetadb", quietly = TRUE))
+  BiocManager::install("GEOmetadb")
+library(GEOmetadb)
+
+# Here I download edgeR only if it is unavailable prior.
+if (!requireNamespace("edgeR", quietly = TRUE))
+  BiocManager::install("edgeR")
+library(edgeR)
+```
+Using getGEOSuppFiles from GEOmetadb, I am getting the expression data for
+GSE159559 (Our data set of interest).
+```{r}
+# Getting the expression data for GSE159559.
+# Getting the expression data for GSE159559.
+supp_files = getGEOSuppFiles('GSE159559')
+gse159 <- getGEO("GSE159559",GSEMatrix=FALSE)
+```
+
+## Overview Information for the Data Set
+Briefly I want to overview information pertaining to the experiment, to assess
+if this candidate's quality is adequate:
+First, I grab the available information pertaining to GSE159559:
+```{r}
+# Grabbing information pertaining to GSE159559
+gse159_gpl_info <- Meta(getGEO(names(GPLList(gse159))[1]))
+```
+Here's a brief GEO description of the data set
+```{r}
+data.frame(head(Meta(gse159)))
+```
+
+**The Platform's Title:** `r gse159_gpl_info$title`
+
+**The Submission Date:** `r gse159_gpl_info$submission_date`
+
+**The Last Update:** `r gse159_gpl_info$last_update_date`
+
+Note, there is some unintended behavior here. Both the submission data and last 
+update data from the above queries suggest dates that are older than I was 
+anticipating. On the expression data set GEO website:
+[GSE159559](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE159559),
+it states that a "Submission date:	"Oct 19, 2020" and a "Last update date
+Feb 27, 2021", with the accompanying article to the 
+[dataset](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7882096/)
+stating it was published in Feb 14 2021. In any case the data was approved for
+use in class and falls in the time-span the assignment states, but I can't 
+figure out why the discrepancy occurred.
+
+**The Organism:**`r gse159_gpl_info$organism`
+This satisfies that the data is human.
+
+**Number of GEO Data Sets That use the Same Technology:** 
+`r length(gse159_gpl_info$series_id)`
+
+**Number of GEO Samples that use this Technology:** 
+`r length(gse159_gpl_info$sample_id)`
+
+The high numbers of samples and data sets that use the same technology was 
+important for us to observe, as we want to choose an experiment that uses a 
+mature experimental platform, to have high confidence in its quality. This 
+experiment made its expression profile by using high throughput sequencing, 
+specifically using Ion Torrent Proton (Homo sapiens) as its platform.
+
+**Grabbing the expression data from the given data set.**
+```{r}
+# Grabbing expression data from data set.
+fnames = rownames(supp_files)
+fam83_exp = read.delim(fnames[1],header=TRUE, check.names = FALSE)
+# Just to see what the unfiltered data set looks like
+head(fam83_exp)
+```
+
+Focusing in on just the column names:
+```{r}
+colnames(fam83_exp)
+```
+Here we can see the data matches the expectations one would have from reading 
+its 
+[GEO page](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE159559). 
+We have a GeneID for each row, which is a mapping to unique human gene 
+identifiers, a GeneType, which gives us information on what type of RNA we are
+using, and 3 replicates of each sample; 3 negative controls for FAM83H‐AS1, and
+3 samples where FAM83H‐AS1 was down regulated, or 'silenced'. The data having at
+least 3 replicates and being produced relative recently adds to our evidence for
+the experiment being of high-quality.
+
+Based on reading the information online pertaining to the data set, I suspect 
+that fam83$geneID will already be mapped properly for future use as 
+HUGO gene identifiers. Looking at the the number of genes in the data set 
+compared to the number of unique gene names in the data set will give us some 
+insight into how many duplicate genes are in the data set.
+```{r}
+# Looking if all genes are unique in list.
+length(fam83_exp$GeneID)
+# Compared to the number of unique genes in the list.
+length(unique(fam83_exp$GeneID))
+
+```
+Both give the result #[1] 40173 as of submission date for assignment. 
+
+## Data Set Mapping & Cleaning
+These both giving an identical result suggests that we do not have the case 
+where a set of rows map on to the same symbol. The lectures show gene duplications
+with a modified version of the following code.
+```{r}
+summarized_gene_counts <- sort(table(fam83_exp$GeneID), decreasing = TRUE)
+head(summarized_gene_counts)
+```
+Clearly this set doesn't have duplicates. To add, the number of unique gene
+names matches the number of gene entries in the data set, which tells us that we
+don't have an issue of an unmapped row, or any anomalous identifier we would 
+have to remedy for. Overall, I feel confident saying, based on the overview done
+prior and following, that the quality of data we're working with is high.
+```{r}
+#the dim of the data set should be 40173
+dim(fam83_exp)
+```
+Each row is assigned a unique gene identifier, relative to the other identifiers
+in the set, all already in the same HUGO format. Below I grab the identifiers 
+used in the data for negative control and silenced data respectively, placing
+them in a data.frame. I didn't really have to do this step, as my data is simply
+3 negative controls followed by 3 experimental sets where FAM83H-AS1 is 
+silenced, so I could have just grabbed the two identifiers that describe the 
+sets in the data: 'NC' and 'Silence'. I thought though that it would be useful
+to rewrite the code to further my understanding of how it works.
+```{r}
+# Grabbing the identifiers used in the data for negative control and silenced
+# data respectively.
+sample_info <- data.frame(lapply(colnames(fam83_exp)[3:8],
+    FUN=function(x){unlist(strsplit(x, split = "-"))[c(1,2)]}))
+colnames(sample_info) <- colnames(fam83_exp)[3:8]
+rownames(sample_info) <- c("cell_type", "sample_number")
+sample_info <- data.frame(t(sample_info))
+
+```
+**Cleaning**
+Going forward, I want to being filtering out low count entries in the data set.
+In the R code here, I go into more detail about the method chosen to do this.
+```{r}
+# Filtering out low counts. I used the method that was suggested by edgeR; to 
+# remove features without at least 1 read per million in the 3 of our samples. 
+# This is because the smallest group of replicates in my experiment is 3.
+cpms = cpm(fam83_exp[,3:8])
+rownames(cpms) <- fam83_exp[,1]
+# Filtering low-occurrence entries to fam83_exp.
+fam83_exp = fam83_exp[rowSums(cpms >1) >=3,]
+dim(fam83_exp)
+# 15082     8, 15082 is much more manageable (as of submission date for assignment.)
+```
+By filtering, we have made the number of genes being analyzed much more 
+'manageable', removing 25091 gene entries from our data set. A total of 15082 is
+much more in line with our class expectations for a well covered data set, but 
+does not filter too much and produce a measurement for only a small amount of 
+genes. Although technically speaking, measurement error will almost certainly 
+occur with any set of measurements, our filtering is not done in a 'biased'
+way to exacerbate some pre-existing measurement error inherent to the data set.
+Rather, we are uniformly applying a minimal threshold for low occurring entries.
+These removed data points would likely not contribute meaningfully to the 
+hypothesis being resolved in the experiment, but may contribute to measuring
+errors if left in the set.
+
+Here I assign the row names to be the HUGO gene symbols for 
+each row.
+```{r}
+# The provided Gene IDs from the data set are HUGO gene symbols, each of which is
+# unique relative to the rest of the data set. Here I am just making the 
+# row names correspond to the Gene Id the row pertains to.
+rownames(fam83_exp) <- fam83_exp$GeneID
+
+# Here I trim off geneType and geneID, to get the data.frame of the desired 
+# result specified by the assignment.
+fam83_exp <- subset(fam83_exp, select = -c(GeneID, GeneType))
+```
+
+## Data Normalization
+Following the course lecture on normalization, it became pertinent for me to
+find a normalization technique that would improve our ability to observe
+biological variation, while minimizing technical variation. To do so would
+require a RNA-Seq compatible method for producing relative RNA levels between 
+samples. In reading the articles associated with the lecture, alongside the
+article associated with the data set, a normalization across the sample would
+be appropriate under the assumption that the majority of genes are not
+differentially expressed, which is a characteristic reflected in the data set's
+experiment. For these reasons, 'Trimmed Mean of M-values' is an appropriate
+sample based normalization technique for the samples in my data set.
+
+The following code is adapted from the lecture material, and performs a TMM
+normalization on our filtered data set.
+```{r}
+d = DGEList(counts=as.matrix(fam83_exp[,1:6]), group=sample_info$cell_type)
+# Calculates normalization factors, using TMM.
+d = calcNormFactors(d, method="TMM")
+# Grabbing the normalized data.
+fam83_norm <- cpm(d) 
+```
+
+## Pre & Post Normalization plots.
+The following code is modified from the lecture notes to produce the 3 sets of
+plots that are most pertinent to analyzing the distributions of our data. For
+comparative reasons the density and boxplots are plotted in tandem to produce
+both plots side by side to each other.
+Here is the code for graphing the boxplot for the sample compared to the 
+normalized sample.
+```{r}
+#Let's us graph both 
+par(mfrow=c(1,2))
+#BOX PLOT SAMPLE
+sampleplot <- log2(cpm(fam83_exp[]))
+boxplot(sampleplot, xlab = "Samples", ylab = "log2 CPM", 
+        las = 2, cex = 0.5, cex.lab = 0.5,
+        cex.axis = 0.5, main = "Original FAM83H-AS1 Samples")
+#draw the median on each box plot
+abline(h = median(apply(sampleplot, 2, median)), 
+       col = "blue", lwd = 0.6, lty = "dashed")
+
+#BOX PLOT NORMALIZED
+normplot <- log2(fam83_norm[])
+boxplot(normplot, xlab = "Samples", ylab = "log2 CPM", 
+        las = 2, cex = 0.5, cex.lab = 0.5,
+        cex.axis = 0.5, main = "Normalized FAM83H-AS1 Samples")
+#draw the median on each box plot
+abline(h = median(apply(normplot, 2, median)), 
+       col = "blue", lwd = 0.6, lty = "dashed")
+```
+It's easier to observe the intended result of the normalization when you 
+blow up the size of the box plots onto a larger side window as the differences 
+are minute, but in the normalized plot you can observe a slight 'straightening'
+of the box plots between samples, which makes sense for a normalized data set.
+The distributions are more or less the same, but they are better aligned.
+
+Below is the code for producing the density plots for our samples pre and post
+normalization, followed by a discussion on any observations. It was modified
+from the lecture notes on how to produce this plot.
+```{r}
+par(mfrow=c(1,2))
+sample_density <- apply(log2(cpm(fam83_exp)), 
+                        2, density)
+norm_density <- apply(log2(fam83_norm), 
+                             2, density)
+#calculate the limits across all the samples
+xlim <- 0; ylim <- 0
+for (i in 1:length(sample_density)) {
+  xlim <- range(c(xlim, sample_density[[i]]$x));
+  xlim <- range(c(xlim, norm_density[[i]]$x));
+  ylim <- range(c(ylim, sample_density[[i]]$y));
+  ylim <- range(c(ylim, norm_density[[i]]$y))
+}
+
+#calculate the limits across all the samples
+cols <- rainbow(length(sample_density))
+ltys <- rep(1, length(sample_density))
+#plot the first density plot to initialize the plot
+plot(sample_density[[1]], xlim=xlim, ylim=ylim, type="n", 
+     ylab="Smoothing density of log2-CPM", 
+     main="FAM83H-AS1 Samples", cex.lab = 0.85)
+#plot each line
+for (i in 1:length(sample_density)) 
+  lines(sample_density[[i]], col=cols[i], lty=ltys[i])
+#create legend
+legend("topright", colnames(normplot), 
+       col=cols, lty=ltys, cex=0.75, 
+       border ="blue", text.col = "green4", 
+       merge = TRUE, bg = "gray90") 
+
+#DENSITY PLOT 2 NORM
+#calculate the limits across all the samples
+cols <- rainbow(length(norm_density))
+ltys <- rep(1, length(norm_density))
+#plot the first density plot to initialize the plot
+plot(norm_density[[1]], xlim=xlim, ylim=ylim, type="n", 
+     ylab="Smoothing density of log2-CPM", 
+     main="Normalized FAM83H-AS1 Samples", cex.lab = 0.85)
+#plot each line
+for (i in 1:length(norm_density)) 
+  lines(norm_density[[i]], col=cols[i], lty=ltys[i])
+#create legend
+legend("topright", colnames(normplot), 
+       col=cols, lty=ltys, cex=0.75, 
+       border ="blue", text.col = "green4", 
+       merge = TRUE, bg = "gray90") 
+```
+I notice that the distributions look similar, but there is a marginal
+improvement with respect to the distribution of outliers. That is to say there
+is less variation in these outliers, which suggests that we've successfully 
+removed some technical variation from the sample.
+
+Multi-dimension scaling plots let us look at distribution in a different way. 
+Here is how to produce one for the data set.
+```{r}
+plotMDS(d, labels=rownames(sample_info), col = c("blue", "red")[factor(sample_info$cell_type)])
+```
+Our Condition, the silencing of the gene, seems to have strong clustering, 
+whereas out control has much greater distribution. This might suggest the
+condition is powerful, as we are seeing strong separation.
+
+## Resulting Data Frame
+fam83_exp is the resulting data frame for the sample that has HUGO symbols as 
+row names, and has x numeric columns where x = 6 (3 controls, 3 experiments).
+fam83_norm will be an equivalent data frame for the normalized solutions, which
+I code for below:
+```{r}
+fam83_norm <- as.data.frame(fam83_norm)
+head(fam83_exp)
+```
+
+## Final Questions
+I have addressed all of these questions at greater detail throughout this 
+R Notebook, but for the purposes of helping the reader I have curated the
+answers here:
+
+**What are the control and test conditions of the dataset?**
+The experiment provides 3 negative controls for A549 cells in humans, followed 
+by down regulated A549 cells for FAM83H‐AS1, in hopes of illuminating that
+FAM83H-AS1 inhibits lung adenocarcinoma apoptosis. This selection of control
+and test condition will give us an opportunity to see how FAM83H-AS1 influences
+the expression of other genes in the cell.
+
+**Why is the dataset of interest to you?**
+The experiment pertaining to the data set used in the assignment is of both
+personal and therapeutic significance. Firstly, I am interested in 
+adenocarcinoma, a form of cancer formed in the glands surrounding organs.
+Adenocarcinoma often is a likely culprit for metastasizing elsewhere in
+the body, dramatically increasing patient harm, and decreasing probability of
+recovery. To add, lung adenocarcinoma metastasizes frequently into the brain,
+which is a difficult organ for treatment purposes.
+The experiment posits that FAM83H‐AS1, a noncoding driver of oncogenesis, might 
+potentially be a therapeutic target for lung adenocarcinoma. The experiment 
+provides 3 negative controls for A549 cells in humans, followed by 
+down regulated A549 cells for FAM83H‐AS1, in hopes of illuminating that
+FAM83H-AS1 inhibits lung adenocarcinoma apoptosis.
+
+**Were there expression values that were not unique for specific genes? How did you handle these?**
+This did not occur as all the expression values were unique to specific genes.
+
+**Were there expression values that could not be mapped to current HUGO symbols?**
+All expression values were mapped to current HUGO symbols.
+
+**How many outliers were removed?**
+25091 outliers were removed.
+
+**How did you handle replicates**
+The replicates of the data set were labelled "NC-1", "NC-2", "NC-3", 
+"Silence-1", "Silence-2", & "Silence-3". Reading the 
+[data set webpage](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE159559)
+it is clear that NC-# pertains to the #th Negative control sample, of which 
+there are named 3, and Silence-# pertains to the #th sample where mRNA profiles
+were observed after FAM83H-AS1 was silenced. As I was using edgeR, I removed 
+features w/o at least 1 read per million in 3 samples, which was the number of 
+replicates. I normalized the samples amongst their respective categories using 
+TMM, which is about all I did with handling the replicates.
+
+**What is the final coverage of your dataset?**
+15082 genes was the final coverage of the data set.
+
