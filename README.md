@@ -13,3 +13,9 @@ Here is the link for A2 .Rmd file:
 
 Here is the link for A2 .html file:
 [HTML VERSION](https://github.com/bcb420-2022/Luka_Trkla/blob/main/a2_luka_trkla.html)
+
+Here is the link for A3 .Rmd file:
+[RMD VERSION](https://github.com/bcb420-2022/Luka_Trkla/blob/main/A3_luka_trkla.Rmd)
+
+Here is the link for A3 .html file:
+[HTML VERSION](https://github.com/bcb420-2022/Luka_Trkla/blob/main/A3_luka_trkla.html)
